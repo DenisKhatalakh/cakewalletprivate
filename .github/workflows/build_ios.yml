@@ -1,35 +1,87 @@
 name: Build iOS IPA
-on: [workflow_dispatch] # Allows you to trigger the build manually
+
+on:
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Compile Flutter Application
-    runs-on: macos-latest # Borrow a virtual cloud Mac from GitHub
+    name: Build Cake Wallet iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Checkout private project
+        uses: actions/checkout@v4
 
-      - name: Set up Flutter SDK
+      # The private repository currently contains the customized widget, but not
+      # the complete Flutter/Cake Wallet source tree. Build against the exact
+      # Cake Wallet release that the customized widget was based on.
+      - name: Checkout Cake Wallet source
+        uses: actions/checkout@v4
+        with:
+          repository: cake-tech/cake_wallet
+          ref: 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
+          path: cake_wallet
+          fetch-depth: 1
+
+      - name: Install Flutter 3.27.4
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          flutter-version: '3.27.4'
+          channel: stable
+          cache: true
 
-      - name: Fetch Dependencies
-        run: flutter pub get
-
-      - name: Build Unsigned iOS App Bundle
-        run: flutter build ios --no-codesign --release
-
-      - name: Package into IPA Format
+      - name: Install build dependencies
         run: |
-          mkdir -p Payload
-          mv build/ios/iphoneos/Runner.app Payload/
-          zip -r CakeWallet.ipa Payload
-          rm -rf Payload
+          brew install automake ccache cmake cocoapods go libtool pkgconfig xz
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          rustup update stable
 
-      - name: Upload IPA to GitHub Artifacts
+      - name: Apply private project customization
+        run: |
+          mkdir -p cake_wallet/lib/src/screens/dashboard/pages/balance
+          cp balance_row_widget.dart cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart
+
+      - name: Configure Cake Wallet for iOS
+        working-directory: cake_wallet/scripts/ios
+        run: |
+          source ./app_env.sh cakewallet
+          ./app_config.sh
+
+      - name: Build native dependencies
+        working-directory: cake_wallet/scripts/ios
+        run: |
+          ./build_monero_all.sh
+          ./build_mwebd.sh
+          ./build_decred.sh
+
+      - name: Install Flutter dependencies
+        working-directory: cake_wallet
+        run: |
+          flutter pub get
+          dart run tool/generate_new_secrets.dart
+          dart run tool/generate_localization.dart
+          ./model_generator.sh
+
+      - name: Build unsigned iOS release
+        working-directory: cake_wallet
+        run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        working-directory: cake_wallet
+        run: |
+          rm -rf Payload CakeWallet.ipa
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          /usr/bin/zip -qry CakeWallet.ipa Payload
+          test -f CakeWallet.ipa
+          test -d Payload/Runner.app
+          unzip -tq CakeWallet.ipa
+
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: CustomCakeWallet
-          path: CakeWallet.ipa
+          name: CakeWallet-IPA
+          path: cake_wallet/CakeWallet.ipa
+          if-no-files-found: error
+          retention-days: 7
