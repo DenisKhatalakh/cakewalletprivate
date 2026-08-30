@@ -22,10 +22,8 @@ jobs:
           git fetch --depth 1 origin 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
           git checkout --detach 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
           cd ..
-          echo "Cake Wallet commit:"
-          git -C cake_wallet rev-parse HEAD
           test "$(git -C cake_wallet rev-parse HEAD)" = "6df6108d37d3e4b2cbbd2968d3728dc8310fdf60"
-          test -f cake_wallet/pubspec.yaml
+          test -f cake_wallet/pubspec_description.yaml
           test -f cake_wallet/ios/Runner.xcodeproj/project.pbxproj
           test -f cake_wallet/scripts/ios/app_env.sh
           test -f cake_wallet/scripts/ios/app_config.sh
@@ -53,6 +51,14 @@ jobs:
           set -euxo pipefail
           brew install automake ccache cmake go libtool pkgconfig xz || true
           rustup default stable
+
+      - name: Generate Cake Wallet pubspec
+        working-directory: cake_wallet
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dart run tool/generate_pubspec.dart
+          test -f pubspec.yaml
 
       - name: Apply existing customization
         shell: bash
@@ -91,25 +97,19 @@ jobs:
 
       - name: Install CocoaPods
         working-directory: cake_wallet/ios
-        shell: bash
-        run: |
-          set -euxo pipefail
-          pod install --repo-update
+        run: pod install --repo-update
 
       - name: Build unsigned iOS release
         working-directory: cake_wallet
-        shell: bash
-        run: |
-          set -euxo pipefail
-          flutter build ios --release --no-codesign
-          test -d build/ios/iphoneos/Runner.app
-          test -f build/ios/iphoneos/Runner.app/Info.plist
+        run: flutter build ios --release --no-codesign
 
       - name: Create and validate IPA
         working-directory: cake_wallet
         shell: bash
         run: |
           set -euxo pipefail
+          test -d build/ios/iphoneos/Runner.app
+          test -f build/ios/iphoneos/Runner.app/Info.plist
           rm -rf Payload CakeWallet.ipa
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
