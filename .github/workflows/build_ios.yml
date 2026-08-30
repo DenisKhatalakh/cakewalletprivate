@@ -7,7 +7,7 @@ jobs:
   build:
     name: Build iOS IPA
     runs-on: macos-14
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout private project
         uses: actions/checkout@v4
@@ -15,16 +15,18 @@ jobs:
       - name: Get Cake Wallet source
         shell: bash
         run: |
-          set -euo pipefail
-          git clone --filter=blob:none --no-checkout https://github.com/cake-tech/cake_wallet.git cake_wallet
+          set -euxo pipefail
+          rm -rf cake_wallet
+          git clone --depth 1 https://github.com/cake-tech/cake_wallet.git cake_wallet
           cd cake_wallet
-          git checkout 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
+          git fetch --depth 1 origin 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
+          git checkout --detach 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
           cd ..
-          echo "Cake Wallet source:"
+          echo "Cake Wallet commit:"
           git -C cake_wallet rev-parse HEAD
           test "$(git -C cake_wallet rev-parse HEAD)" = "6df6108d37d3e4b2cbbd2968d3728dc8310fdf60"
           test -f cake_wallet/pubspec.yaml
-          test -d cake_wallet/ios
+          test -f cake_wallet/ios/Runner.xcodeproj/project.pbxproj
           test -f cake_wallet/scripts/ios/app_env.sh
           test -f cake_wallet/scripts/ios/app_config.sh
           test -f balance_row_widget.dart
@@ -39,7 +41,7 @@ jobs:
       - name: Set up Apple build environment
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
           flutter --version
@@ -48,24 +50,23 @@ jobs:
       - name: Install native tools
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           brew install automake ccache cmake go libtool pkgconfig xz || true
           rustup default stable
 
       - name: Apply existing customization
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           TARGET="cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart"
-          test -f balance_row_widget.dart
-          test -d "$(dirname "$TARGET")"
+          test -f "$TARGET"
           cp balance_row_widget.dart "$TARGET"
 
       - name: Configure Cake Wallet
         working-directory: cake_wallet/scripts/ios
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           source ./app_env.sh cakewallet
           ./app_config.sh
 
@@ -73,7 +74,7 @@ jobs:
         working-directory: cake_wallet/scripts/ios
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           ./build_monero_all.sh
           ./build_mwebd.sh
           ./build_decred.sh
@@ -82,7 +83,7 @@ jobs:
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           flutter pub get
           dart run tool/generate_new_secrets.dart
           dart run tool/generate_localization.dart
@@ -92,14 +93,14 @@ jobs:
         working-directory: cake_wallet/ios
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           pod install --repo-update
 
-      - name: Build unsigned iOS app
+      - name: Build unsigned iOS release
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           flutter build ios --release --no-codesign
           test -d build/ios/iphoneos/Runner.app
           test -f build/ios/iphoneos/Runner.app/Info.plist
@@ -108,7 +109,7 @@ jobs:
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           rm -rf Payload CakeWallet.ipa
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
