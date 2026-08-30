@@ -8,25 +8,21 @@ jobs:
     name: Build iOS IPA
     runs-on: macos-14
     timeout-minutes: 120
-
     steps:
       - name: Checkout private project
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Checkout Cake Wallet source
-        uses: actions/checkout@v4
-        with:
-          repository: cake-tech/cake_wallet
-          ref: 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
-          path: cake_wallet
-          fetch-depth: 1
-
-      - name: Verify source
+      - name: Get Cake Wallet source
         shell: bash
         run: |
           set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/cake-tech/cake_wallet.git cake_wallet
+          cd cake_wallet
+          git checkout 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
+          cd ..
+          echo "Cake Wallet source:"
+          git -C cake_wallet rev-parse HEAD
+          test "$(git -C cake_wallet rev-parse HEAD)" = "6df6108d37d3e4b2cbbd2968d3728dc8310fdf60"
           test -f cake_wallet/pubspec.yaml
           test -d cake_wallet/ios
           test -f cake_wallet/scripts/ios/app_env.sh
@@ -40,22 +36,30 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install dependencies
+      - name: Set up Apple build environment
         shell: bash
         run: |
           set -euo pipefail
-          brew install automake ccache cmake cocoapods go libtool pkgconfig xz || true
-          rustup default stable
           sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
           flutter --version
+          pod --version
 
-      - name: Apply existing customization only
+      - name: Install native tools
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p cake_wallet/lib/src/screens/dashboard/pages/balance
-          cp balance_row_widget.dart cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart
+          brew install automake ccache cmake go libtool pkgconfig xz || true
+          rustup default stable
+
+      - name: Apply existing customization
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart"
+          test -f balance_row_widget.dart
+          test -d "$(dirname "$TARGET")"
+          cp balance_row_widget.dart "$TARGET"
 
       - name: Configure Cake Wallet
         working-directory: cake_wallet/scripts/ios
@@ -65,7 +69,7 @@ jobs:
           source ./app_env.sh cakewallet
           ./app_config.sh
 
-      - name: Build native libraries
+      - name: Build native dependencies
         working-directory: cake_wallet/scripts/ios
         shell: bash
         run: |
@@ -74,7 +78,7 @@ jobs:
           ./build_mwebd.sh
           ./build_decred.sh
 
-      - name: Prepare Flutter
+      - name: Prepare Flutter project
         working-directory: cake_wallet
         shell: bash
         run: |
@@ -84,22 +88,23 @@ jobs:
           dart run tool/generate_localization.dart
           ./model_generator.sh
 
-      - name: Install iOS pods
+      - name: Install CocoaPods
         working-directory: cake_wallet/ios
         shell: bash
         run: |
           set -euo pipefail
           pod install --repo-update
 
-      - name: Build iOS release
+      - name: Build unsigned iOS app
         working-directory: cake_wallet
         shell: bash
         run: |
           set -euo pipefail
           flutter build ios --release --no-codesign
           test -d build/ios/iphoneos/Runner.app
+          test -f build/ios/iphoneos/Runner.app/Info.plist
 
-      - name: Create IPA
+      - name: Create and validate IPA
         working-directory: cake_wallet
         shell: bash
         run: |
@@ -107,12 +112,10 @@ jobs:
           rm -rf Payload CakeWallet.ipa
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
-          cd Payload
-          zip -qry ../CakeWallet.ipa Runner.app
-          cd ..
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload CakeWallet.ipa
           test -s CakeWallet.ipa
           unzip -tq CakeWallet.ipa
-          unzip -l CakeWallet.ipa | grep -F 'Runner.app/' >/dev/null
+          unzip -l CakeWallet.ipa | grep -F 'Payload/Runner.app/Info.plist' >/dev/null
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
