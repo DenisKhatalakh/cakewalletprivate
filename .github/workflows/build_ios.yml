@@ -32,7 +32,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: '3.29.3'
           channel: stable
           cache: true
 
@@ -97,19 +97,25 @@ jobs:
 
       - name: Install CocoaPods
         working-directory: cake_wallet/ios
-        run: pod install --repo-update
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pod install --repo-update
 
       - name: Build unsigned iOS release
         working-directory: cake_wallet
-        run: flutter build ios --release --no-codesign
+        shell: bash
+        run: |
+          set -euxo pipefail
+          flutter build ios --release --no-codesign
+          test -d build/ios/iphoneos/Runner.app
+          test -f build/ios/iphoneos/Runner.app/Info.plist
 
       - name: Create and validate IPA
         working-directory: cake_wallet
         shell: bash
         run: |
           set -euxo pipefail
-          test -d build/ios/iphoneos/Runner.app
-          test -f build/ios/iphoneos/Runner.app/Info.plist
           rm -rf Payload CakeWallet.ipa
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
