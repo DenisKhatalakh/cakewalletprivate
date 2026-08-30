@@ -5,109 +5,116 @@ on:
 
 jobs:
   build:
-    name: Build Cake Wallet iOS IPA
-    runs-on: macos-15
+    name: Build iOS IPA
+    runs-on: macos-14
     timeout-minutes: 120
 
     steps:
-      - name: Checkout private customization
+      - name: Checkout private project
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Checkout matching Cake Wallet source
+      - name: Checkout Cake Wallet source
+        uses: actions/checkout@v4
+        with:
+          repository: cake-tech/cake_wallet
+          ref: 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
+          path: cake_wallet
+          fetch-depth: 1
+
+      - name: Verify source
         shell: bash
         run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/cake-tech/cake_wallet.git cake_wallet
-          cd cake_wallet
-          git fetch --depth 1 origin 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
-          git checkout --detach 6df6108d37d3e4b2cbbd2968d3728dc8310fdf60
-          test -f pubspec.yaml
-          test -d ios
-          test -f scripts/ios/app_config.sh
+          set -euo pipefail
+          test -f cake_wallet/pubspec.yaml
+          test -d cake_wallet/ios
+          test -f cake_wallet/scripts/ios/app_env.sh
+          test -f cake_wallet/scripts/ios/app_config.sh
+          test -f balance_row_widget.dart
 
-      - name: Install Flutter 3.27.4
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.27.4'
           channel: stable
           cache: true
 
-      - name: Install native build dependencies
+      - name: Install dependencies
         shell: bash
         run: |
-          set -euxo pipefail
-          brew install automake ccache cmake cocoapods go libtool pkgconfig xz
-          sudo softwareupdate --install-rosetta --agree-to-license || true
-          rustup toolchain install stable --profile minimal
+          set -euo pipefail
+          brew install automake ccache cmake cocoapods go libtool pkgconfig xz || true
           rustup default stable
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+          flutter --version
 
-      - name: Apply existing private customization
+      - name: Apply existing customization only
         shell: bash
         run: |
-          set -euxo pipefail
-          test -f balance_row_widget.dart
+          set -euo pipefail
+          mkdir -p cake_wallet/lib/src/screens/dashboard/pages/balance
           cp balance_row_widget.dart cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart
-          test -f cake_wallet/lib/src/screens/dashboard/pages/balance/balance_row_widget.dart
 
-      - name: Configure iOS app
+      - name: Configure Cake Wallet
         working-directory: cake_wallet/scripts/ios
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           source ./app_env.sh cakewallet
           ./app_config.sh
 
-      - name: Build native dependencies
+      - name: Build native libraries
         working-directory: cake_wallet/scripts/ios
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           ./build_monero_all.sh
           ./build_mwebd.sh
           ./build_decred.sh
 
-      - name: Install Flutter dependencies and generate sources
+      - name: Prepare Flutter
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euxo pipefail
-          flutter --version
+          set -euo pipefail
           flutter pub get
           dart run tool/generate_new_secrets.dart
           dart run tool/generate_localization.dart
           ./model_generator.sh
 
-      - name: Install CocoaPods dependencies
+      - name: Install iOS pods
         working-directory: cake_wallet/ios
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           pod install --repo-update
 
-      - name: Build unsigned iOS release
+      - name: Build iOS release
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           flutter build ios --release --no-codesign
           test -d build/ios/iphoneos/Runner.app
 
-      - name: Package valid IPA
+      - name: Create IPA
         working-directory: cake_wallet
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           rm -rf Payload CakeWallet.ipa
-          mkdir Payload
+          mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
-          /usr/bin/zip -qry CakeWallet.ipa Payload
+          cd Payload
+          zip -qry ../CakeWallet.ipa Runner.app
+          cd ..
           test -s CakeWallet.ipa
           unzip -tq CakeWallet.ipa
-          unzip -l CakeWallet.ipa | grep -F 'Payload/Runner.app/' >/dev/null
+          unzip -l CakeWallet.ipa | grep -F 'Runner.app/' >/dev/null
 
-      - name: Upload IPA artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: CakeWallet-IPA
